@@ -1,11 +1,13 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-/// Edit this file to define custom logic or remove it if it is not needed.
-/// Learn more about FRAME and the core library of Substrate FRAME pallets:
-/// https://substrate.dev/docs/en/knowledgebase/runtime/frame
-
-use frame_support::{decl_module, decl_storage, decl_event, decl_error, dispatch, traits::Get};
-use frame_system::ensure_signed;
+use codec::{ Decode, Encode };
+use frame_support::{
+	decl_module, decl_storage, decl_event, 
+	decl_error, dispatch::DispatchResult,
+	ensure,
+};
+use sp_std::prelude::Vec;
+use frame_system::{ensure_root, ensure_signed};
 
 #[cfg(test)]
 mod mock;
@@ -13,91 +15,162 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-/// Configure the pallet by specifying the parameters and types on which it depends.
 pub trait Trait: frame_system::Trait {
-	/// Because this pallet emits events, it depends on the runtime's definition of an event.
 	type Event: From<Event<Self>> + Into<<Self as frame_system::Trait>::Event>;
 }
 
-// The pallet's runtime storage items.
-// https://substrate.dev/docs/en/knowledgebase/runtime/storage
 decl_storage! {
-	// A unique name is used to ensure that the pallet's storage items are isolated.
-	// This name may be updated, but each pallet in the runtime must use a unique name.
-	// ---------------------------------vvvvvvvvvvvvvv
-	trait Store for Module<T: Trait> as TemplateModule {
-		// Learn more about declaring storage items:
-		// https://substrate.dev/docs/en/knowledgebase/runtime/storage#declaring-storage-items
-		Something get(fn something): Option<u32>;
+	trait Store for Module<T: Trait> as GamePallet {
+		CurrentGameState get(fn game_state): GameState=GameState::Ended;
+		CurrentResults get(fn result_pool): map hasher(blake2_128_concat) T::AccountId => u64;
+		PlayersPool get(fn players): Vec<T::AccountId>;
+		GameRecords get(fn game_records): map hasher(blake2_128_concat) T::AccountId => u64;
 	}
 }
 
-// Pallets use events to inform users when important changes are made.
-// https://substrate.dev/docs/en/knowledgebase/runtime/events
 decl_event!(
 	pub enum Event<T> where AccountId = <T as frame_system::Trait>::AccountId {
-		/// Event documentation should end with an array that provides descriptive names for event
-		/// parameters. [something, who]
-		SomethingStored(u32, AccountId),
+		GameStarted,
+		GameEnded,
+		GameWonBy(AccountId, u64),
+		NewPlayerJoined(AccountId),
+		ScoreAddedFor(AccountId, u64),
+		NoWinnerInThisMatch,
 	}
 );
 
-// Errors inform users that something went wrong.
 decl_error! {
 	pub enum Error for Module<T: Trait> {
-		/// Error names should be descriptive.
-		NoneValue,
-		/// Errors should have helpful documentation associated with them.
-		StorageOverflow,
+		GameAlreadyStarted,
+		GameAlreadyEnded,
 	}
 }
 
-// Dispatchable functions allows users to interact with the pallet and invoke state changes.
-// These functions materialize as "extrinsics", which are often compared to transactions.
-// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 decl_module! {
 	pub struct Module<T: Trait> for enum Call where origin: T::Origin {
-		// Errors must be initialized if they are used by the pallet.
 		type Error = Error<T>;
-
-		// Events must be initialized if they are used by the pallet.
+		
 		fn deposit_event() = default;
 
-		/// An example dispatchable that takes a singles value as a parameter, writes the value to
-		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
-		#[weight = 10_000 + T::DbWeight::get().writes(1)]
-		pub fn do_something(origin, something: u32) -> dispatch::DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			// This function will return an error if the extrinsic is not signed.
-			// https://substrate.dev/docs/en/knowledgebase/runtime/origin
-			let who = ensure_signed(origin)?;
+		#[weight = 10_000]
+		fn start_new_game(origin) -> DispatchResult {
+			// Only root can start the game
+			let _ = ensure_root(origin)?;
 
-			// Update storage.
-			Something::put(something);
+			// check has the game already started
+			ensure!(Self::game_state() == GameState::Ended, Error::<T>::GameAlreadyStarted);
 
-			// Emit an event.
-			Self::deposit_event(RawEvent::SomethingStored(something, who));
-			// Return a successful DispatchResult
+			// start the new game
+			<CurrentGameState>::put(GameState::CurrentlyPlaying);
+			Self::deposit_event(RawEvent::GameStarted);
+
 			Ok(())
 		}
 
-		/// An example dispatchable that may throw a custom error.
-		#[weight = 10_000 + T::DbWeight::get().reads_writes(1,1)]
-		pub fn cause_error(origin) -> dispatch::DispatchResult {
-			let _who = ensure_signed(origin)?;
+		#[weight = 10_000]
+		fn end_current_game(origin) -> DispatchResult {
+			// Only root can end the game
+			let _ = ensure_root(origin)?;
 
-			// Read a value from storage.
-			match Something::get() {
-				// Return an error if the value has not been set.
-				None => Err(Error::<T>::NoneValue)?,
-				Some(old) => {
-					// Increment the value read from storage; will error in the event of overflow.
-					let new = old.checked_add(1).ok_or(Error::<T>::StorageOverflow)?;
-					// Update the value in storage with the incremented result.
-					Something::put(new);
-					Ok(())
+			// check has the game already ended
+			ensure!(Self::game_state() == GameState::CurrentlyPlaying, Error::<T>::GameAlreadyEnded);
+
+			// choose a winner
+			match Self::get_winner() {
+				Some((winner, result)) => {
+					// output the winner
+					Self::deposit_event(RawEvent::GameWonBy(winner, result));
 				},
+				None => {
+					Self::deposit_event(RawEvent::NoWinnerInThisMatch);
+				}
 			}
+
+			// end the game
+			<CurrentGameState>::put(GameState::Ended);
+			Self::deposit_event(RawEvent::GameEnded);
+
+			Ok(())
+		}
+
+		#[weight = 10_000]
+		fn add_score(origin, new_score: u64) -> DispatchResult {
+			// player can add score only for himself
+			let player = ensure_signed(origin)?;
+
+			// check has the game already started
+			ensure!(Self::game_state() == GameState::CurrentlyPlaying, Error::<T>::GameAlreadyEnded);
+
+			// check is new player
+			if !<GameRecords<T>>::contains_key(&player) {
+				Self::deposit_event(RawEvent::NewPlayerJoined(player.clone()));
+				<GameRecords<T>>::insert(&player, 0);
+				<CurrentResults<T>>::insert(&player, new_score);
+
+				// add to player pool
+				let mut players = <PlayersPool<T>>::get();
+				players.push(player.clone());
+				<PlayersPool<T>>::put(players);
+
+				Self::deposit_event(RawEvent::ScoreAddedFor(player, new_score));
+			} else {
+				// check is player alredy in the current match
+				if <CurrentResults<T>>::contains_key(&player) {
+					let current_score = <CurrentResults<T>>::get(&player);
+					let updated_score = current_score + new_score;
+					<CurrentResults<T>>::insert(&player, updated_score);
+					Self::deposit_event(RawEvent::ScoreAddedFor(player, updated_score));
+				} else {
+					<CurrentResults<T>>::insert(&player, new_score);
+					Self::deposit_event(RawEvent::ScoreAddedFor(player, new_score));
+				}
+			}
+
+			Ok(())
+		}
+	}
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug)]
+pub enum GameState {
+	CurrentlyPlaying,
+	Ended,
+}
+
+impl Default for GameState {
+	fn default() -> Self { Self::Ended }
+}
+
+impl<T: Trait> Module<T> {
+	fn get_winner() -> Option<(T::AccountId, u64)> {
+		let players = PlayersPool::<T>::get();		
+
+		let mut best_player: Option<(T::AccountId, u64)> = None;
+
+		for player in players {
+			if <CurrentResults<T>>::contains_key(&player) {
+				let current_score = <CurrentResults<T>>::get(&player);
+
+				if let Some(ref temp) = best_player {
+					if current_score > temp.1 {
+						best_player = Some((player.clone(), current_score));
+					}
+				} else {
+					best_player = Some((player.clone(), current_score));
+				}
+
+				<CurrentResults<T>>::remove(&player);
+			}
+		}
+
+		Self::update_game_records(&best_player);
+		best_player
+	}
+
+	fn update_game_records(player: &Option<(T::AccountId, u64)>) {
+		if let Some((player_address, _)) = player {
+			let current_score = <GameRecords<T>>::get(&player_address);
+			<GameRecords<T>>::insert(&player_address, current_score + 1);
 		}
 	}
 }
