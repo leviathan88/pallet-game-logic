@@ -1,19 +1,20 @@
 use crate::{Module, Trait};
 use sp_core::H256;
-use frame_support::{impl_outer_origin, parameter_types, weights::Weight};
+use frame_support::{impl_outer_origin, parameter_types, weights::Weight, impl_outer_event};
 use sp_runtime::{
 	traits::{BlakeTwo256, IdentityLookup}, testing::Header, Perbill,
 };
+use sp_io::TestExternalities;
 use frame_system as system;
 
 impl_outer_origin! {
-	pub enum Origin for Test {}
+	pub enum Origin for TestRuntime {}
 }
 
 // Configure a mock runtime to test the pallet.
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct Test;
+pub struct TestRuntime;
 parameter_types! {
 	pub const BlockHashCount: u64 = 250;
 	pub const MaximumBlockWeight: Weight = 1024;
@@ -21,7 +22,7 @@ parameter_types! {
 	pub const AvailableBlockRatio: Perbill = Perbill::from_percent(75);
 }
 
-impl system::Trait for Test {
+impl system::Trait for TestRuntime {
 	type BaseCallFilter = ();
 	type Origin = Origin;
 	type Call = ();
@@ -32,7 +33,7 @@ impl system::Trait for Test {
 	type AccountId = u64;
 	type Lookup = IdentityLookup<Self::AccountId>;
 	type Header = Header;
-	type Event = ();
+	type Event = TestEvent;
 	type BlockHashCount = BlockHashCount;
 	type MaximumBlockWeight = MaximumBlockWeight;
 	type DbWeight = ();
@@ -49,13 +50,39 @@ impl system::Trait for Test {
 	type SystemWeightInfo = ();
 }
 
-impl Trait for Test {
-	type Event = ();
+mod my_events {
+	pub use crate::Event;
 }
 
-pub type TemplateModule = Module<Test>;
-
-// Build genesis storage according to the mock runtime.
-pub fn new_test_ext() -> sp_io::TestExternalities {
-	system::GenesisConfig::default().build_storage::<Test>().unwrap().into()
+impl_outer_event! {
+	pub enum TestEvent for TestRuntime {
+		my_events<T>,
+		system<T>,
+	}
 }
+
+impl Trait for TestRuntime {
+	type Event = TestEvent;
+}
+
+pub type System = system::Module<TestRuntime>;
+pub type GameModule = Module<TestRuntime>;
+
+pub struct ExternalityBuilder;
+
+impl ExternalityBuilder {
+	pub fn build() -> TestExternalities {
+		let storage = system::GenesisConfig::default()
+			.build_storage::<TestRuntime>()
+			.unwrap();
+
+		let mut ext = TestExternalities::from(storage);
+
+		ext.execute_with(|| System::set_block_number(1));
+		ext
+	}
+}
+
+
+
+
