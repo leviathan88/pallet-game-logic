@@ -1,16 +1,33 @@
-# Substrate Pallet Template
-
-This is a template for a Substrate pallet which lives as its own crate so it can be imported into multiple runtimes. It is based on the ["template" pallet](https://github.com/paritytech/substrate/tree/master/bin/node-template/pallets/template) that is included with the [Substrate node template](https://github.com/paritytech/substrate/tree/master/bin/node-template).
-
-Check out the [HOWTO](HOWTO.md) to learn how to use this for your own runtime module.
-
-This README should act as a general template for distributing your pallet to others.
+# Game Logic Pallet
 
 ## Purpose
 
-This pallet acts as a template for building other pallets.
+This is an example pallet for game logic on the blockchain.
+The idea behind this pallet is that you can start the game and its
+scores are tracked on the chain.
 
-It currently allows a user to put a `u32` value into storage, which triggers a runtime event.
+API looks like this:
+
+```Rust
+// Only Root user can start the game
+fn start_new_game(origin) -> DispatchResult {}
+
+// Add score - user's address
+fn add_score(origin, new_score: u64) -> DispatchResult {}
+
+// Only Root user can end the game
+fn end_current_game(origin) -> DispatchResult {}
+```
+
+Upon end of the game, the winner is chosen and stored on the chain,
+The current game is ended and points are reset, only points that are persisted
+on the chain are the records of the winners.
+
+### TODO
+- [x] Write game logic
+- [x] Write tests
+- [ ] Implement RPC call to query the call for all teh winners and their points
+- [ ] Play with offchain workers (just because)
 
 ## Dependencies
 
@@ -29,7 +46,7 @@ This pallet does not depend on any other FRAME pallet or externally developed mo
 To add this pallet to your runtime, simply include the following to your runtime's `Cargo.toml` file:
 
 ```TOML
-[dependencies.substrate-pallet-template]
+[dependencies.pallet-game-logic]
 default_features = false
 git = 'https://github.com/substrate-developer-hub/substrate-pallet-template.git'
 ```
@@ -39,7 +56,7 @@ and update your runtime's `std` feature to include this pallet:
 ```TOML
 std = [
     # --snip--
-    'example_pallet/std',
+    'pallet-game-logic/std',
 ]
 ```
 
@@ -49,7 +66,7 @@ You should implement it's trait like so:
 
 ```rust
 /// Used for test_module
-impl example_pallet::Trait for Runtime {
+impl pallet_game_logic::Trait for Runtime {
 	type Event = Event;
 }
 ```
@@ -71,5 +88,3 @@ You can view the reference docs for this pallet by running:
 ```
 cargo doc --open
 ```
-
-or by visiting this site: <Add Your Link>
