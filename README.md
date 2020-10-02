@@ -48,7 +48,7 @@ To add this pallet to your runtime, simply include the following to your runtime
 ```TOML
 [dependencies.pallet-game-logic]
 default_features = false
-git = 'https://github.com/substrate-developer-hub/substrate-pallet-template.git'
+git = 'https://github.com/leviathan88/pallet-game-logic.git'
 ```
 
 and update your runtime's `std` feature to include this pallet:
@@ -74,7 +74,7 @@ impl pallet_game_logic::Trait for Runtime {
 and include it in your `construct_runtime!` macro:
 
 ```rust
-ExamplePallet: substrate_pallet_template::{Module, Call, Storage, Event<T>},
+PalletGameLogic: pallet_game_logic::{Module, Call, Storage, Event<T>},
 ```
 
 ### Genesis Configuration
